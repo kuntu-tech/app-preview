@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kanban Widget</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #0c0d16;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 1.1rem;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+
+      .column {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .column h2 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .task {
+        padding: 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .task small {
+        opacity: 0.65;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      button {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        background: linear-gradient(135deg, rgba(120, 61, 255, 0.9), rgba(64, 201, 255, 0.9));
+        color: #fff;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 80px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.05);
+        color: inherit;
+        padding: 8px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Kanban Widget</h1>
+      <section class="toolbar">
+        <button id="refresh">刷新</button>
+        <button id="addTask" class="secondary">新增任务</button>
+        <span id="status"></span>
+      </section>
+      <section id="board" class="board"></section>
+
+      <dialog id="dialog">
+        <form method="dialog">
+          <p><label>任务标题 <input id="task-title" required /></label></p>
+          <p><label>所属列 <input id="task-column" required /></label></p>
+          <menu>
+            <button value="cancel" class="secondary">取消</button>
+            <button value="confirm">保存</button>
+          </menu>
+        </form>
+      </dialog>
+    </main>
+
+    <script>
+      const state = {
+        structuredContent: null,
+        meta: null,
+        pending: false,
+      };
+
+      const boardEl = document.getElementById('board');
+      const statusEl = document.getElementById('status');
+      const refreshButton = document.getElementById('refresh');
+      const addButton = document.getElementById('addTask');
+      const dialog = document.getElementById('dialog');
+      const taskTitleInput = document.getElementById('task-title');
+      const taskColumnInput = document.getElementById('task-column');
+
+      refreshButton.addEventListener('click', () => {
+        callTool('refresh-board', {});
+      });
+
+      addButton.addEventListener('click', () => {
+        taskTitleInput.value = '';
+        taskColumnInput.value = '';
+        dialog.showModal();
+      });
+
+      dialog.addEventListener('close', () => {
+        if (dialog.returnValue === 'confirm') {
+          callTool('create-task', {
+            title: taskTitleInput.value,
+            column: taskColumnInput.value,
+          });
+        }
+      });
+
+      function callTool(tool, args) {
+        statusEl.textContent = `调用 ${tool}…`;
+        window.parent.postMessage({
+          type: 'openai.callTool',
+          tool,
+          args,
+          invocationId: `${tool}-${Date.now()}`,
+        }, '*');
+      }
+
+      window.addEventListener('message', (event) => {
+        const message = event.data;
+        if (!message || typeof message !== 'object') return;
+
+        if (message.type === 'openai.toolOutput') {
+          const { structuredContent, meta, _meta } = message.data;
+          state.structuredContent = structuredContent;
+          state.meta = meta ?? _meta;
+          render();
+        }
+
+        if (message.type === 'openai.toolResult') {
+          const result = message.data;
+          if (result && typeof result === 'object') {
+            if ('structuredContent' in result) {
+              state.structuredContent = result.structuredContent;
+            }
+            if ('_meta' in result) {
+              state.meta = result._meta;
+            }
+            if ('meta' in result && !state.meta) {
+              state.meta = result.meta;
+            }
+          }
+          statusEl.textContent = '已同步';
+          render();
+        }
+
+        if (message.type === 'openai.toolError') {
+          statusEl.textContent = `调用失败：${message.data?.message ?? '未知错误'}`;
+        }
+      });
+
+      function render() {
+        boardEl.innerHTML = '';
+        const structured = state.structuredContent;
+        const meta = state.meta;
+        if (!structured || !structured.columns) {
+          boardEl.innerHTML = '<p>暂无数据。调用工具以加载看板。</p>';
+          return;
+        }
+
+        const columns = structured.columns;
+        columns.forEach((column) => {
+          const columnEl = document.createElement('article');
+          columnEl.className = 'column';
+          columnEl.innerHTML = `<h2>${escapeHtml(column.title ?? column.id)}</h2>`;
+          const tasks = column.tasks ?? [];
+          tasks.forEach((taskId) => {
+            const task = meta?.tasksById?.[taskId];
+            const taskEl = document.createElement('div');
+            taskEl.className = 'task';
+            taskEl.innerHTML = `
+              <strong>${escapeHtml(task?.title ?? taskId)}</strong>
+              <small>${escapeHtml(task?.status ?? '未开始')}</small>
+            `;
+            const actions = document.createElement('div');
+            actions.className = 'toolbar';
+            const advance = document.createElement('button');
+            advance.textContent = '推进';
+            advance.className = 'secondary';
+            advance.addEventListener('click', () => {
+              callTool('advance-task', { taskId });
+            });
+            actions.appendChild(advance);
+            taskEl.appendChild(actions);
+            columnEl.appendChild(taskEl);
+          });
+          boardEl.appendChild(columnEl);
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      render();
+    </script>
+  </body>
+</html>
