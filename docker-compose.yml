@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  mcp-chat-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5174:5174"
+    environment:
+      - NODE_ENV=production
+      - PORT=5174
+      - HOST=0.0.0.0
+      - MCP_TARGET=${MCP_TARGET:-http://localhost:3001}
+      - MCP_PROXY_SECURE=${MCP_PROXY_SECURE:-true}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
+    restart: unless-stopped
