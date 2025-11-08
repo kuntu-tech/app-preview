@@ -440,12 +440,30 @@ body {
   font-size: 1.1rem;
   box-shadow: 0 14px 28px rgba(17, 24, 39, 0.2);
   transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  position: relative;
 }
 
 .composer__send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   box-shadow: none;
+  color: transparent;
+}
+
+.composer__send:disabled svg,
+.composer__send:disabled span:not(.sr-only) {
+  opacity: 0;
+}
+
+.composer__send:disabled::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  animation: spin 0.9s linear infinite;
 }
 
 .composer__send:not(:disabled):hover {
