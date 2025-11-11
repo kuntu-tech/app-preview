@@ -1,4 +1,4 @@
-import { FormEvent, SVGProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, SVGProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MCPClient } from './lib/mcpClient';
 import { ToolArgumentBuilder } from './lib/toolArgumentBuilder';
 import { buildToolGuidance } from './lib/toolGuidance';
@@ -466,6 +466,23 @@ export default function App({ appVersion }: AppProps) {
     (argumentMode === 'json' && !selectedTool) ||
     (argumentMode === 'auto' && tools.length === 0);
 
+  const handleComposerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== 'Enter' || event.shiftKey) {
+        return;
+      }
+      event.preventDefault();
+      if (sendDisabled) {
+        return;
+      }
+      const form = event.currentTarget.form;
+      if (form) {
+        form.requestSubmit();
+      }
+    },
+    [sendDisabled],
+  );
+
   const handleServerUrlSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -525,6 +542,7 @@ export default function App({ appVersion }: AppProps) {
             ref={composerRef}
             value={messageDraft}
             onChange={(event) => setMessageDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
             placeholder="Ask Anything"
             rows={3}
             aria-label="Chat input"
