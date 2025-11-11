@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MCPToolCallResult } from '../lib/mcpTypes';
+import { WidgetResourceError } from '../lib/mcpClient';
 import type { MCPClient, WidgetResource } from '../lib/mcpClient';
 
 export interface WidgetFrameProps {
@@ -24,22 +25,38 @@ export function WidgetFrame({ client, widgetUri, payload, onToolInvocation }: Wi
   const [iframeReady, setIframeReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [iframeHeight, setIframeHeight] = useState<number | null>(null);
+  const [hideWidget, setHideWidget] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const userQuestion = useMemo(() => inferUserQuestion(payload.meta), [payload.meta]);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setIframeReady(false);
     setIframeHeight(null);
+    setHideWidget(false);
+    setAnalysis(null);
+    setAnalysisError(null);
+    setAnalysisLoading(false);
     client
       .resolveWidgetResource(widgetUri)
       .then((resource) => {
         if (!cancelled) {
+          setHideWidget(false);
           setWidgetResource(resource);
         }
       })
       .catch((err) => {
         console.error('Failed to resolve widget resource', err);
         if (!cancelled) {
+          if (err instanceof WidgetResourceError && err.code === 'widget_resource_unavailable') {
+            setHideWidget(true);
+            setWidgetResource(null);
+            setError(null);
+            return;
+          }
           setWidgetResource(null);
           setError(err instanceof Error ? err.message : String(err));
         }
@@ -48,6 +65,67 @@ export function WidgetFrame({ client, widgetUri, payload, onToolInvocation }: Wi
       cancelled = true;
     };
   }, [client, widgetUri]);
+
+  useEffect(() => {
+    if (!hideWidget) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      setAnalysisLoading(false);
+      return;
+    }
+    if (!payload.structuredContent) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      setAnalysisLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setAnalysisError(null);
+    setAnalysis(null);
+    setAnalysisLoading(true);
+
+    const locale = 'en-US';
+
+    fetch('/api/openai/widget-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        structuredContent: payload.structuredContent,
+        meta: payload.meta ?? null,
+        toolName: extractToolName(payload.meta),
+        widgetUri,
+        locale,
+        question: userQuestion,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const text = await response.text();
+          const errorText = text || `Widget summary request failed (${response.status})`;
+          throw new Error(errorText);
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const summary = typeof data?.summary === 'string' ? data.summary : null;
+        setAnalysis(summary);
+        setAnalysisLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled || err?.name === 'AbortError') return;
+        setAnalysisError(err instanceof Error ? err.message : String(err));
+        setAnalysisLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [hideWidget, payload.structuredContent, payload.meta, widgetUri, userQuestion]);
 
   const toolOutputMessage = useMemo(
     () => ({
@@ -227,6 +305,21 @@ export function WidgetFrame({ client, widgetUri, payload, onToolInvocation }: Wi
     );
   }
 
+  if (hideWidget) {
+    return (
+      <div className="widget-frame widget-frame--textual">
+        {analysisLoading && <p>AI is summarizing the tool output…</p>}
+        {!analysisLoading && analysis && <p>{analysis}</p>}
+        {!analysisLoading && analysisError && (
+          <p className="widget-frame__error">Unable to generate a summary: {analysisError}</p>
+        )}
+        {!analysisLoading && !analysis && !analysisError && (
+          <p>The widget is unavailable and no structured data was provided.</p>
+        )}
+      </div>
+    );
+  }
+
   if (!widgetResource) {
     return (
       <div className="widget-frame widget-frame--loading">
@@ -275,4 +368,32 @@ function injectBase(html: string, baseUrl?: string): string {
     return html.replace(/<head([^>]*)>/i, (match) => `${match}${baseTag}`);
   }
   return `<head>${baseTag}</head>${html}`;
+}
+
+function inferUserQuestion(meta?: Record<string, unknown>): string | undefined {
+  if (!meta || typeof meta !== 'object') {
+    return undefined;
+  }
+  const candidates = ['userPrompt', 'userQuery', 'question', 'request', 'prompt'];
+  for (const key of candidates) {
+    const value = meta[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function extractToolName(meta?: Record<string, unknown>): string | undefined {
+  if (!meta || typeof meta !== 'object') {
+    return undefined;
+  }
+  const candidates = ['toolName', 'tool', 'openai.toolName', 'openai/toolName'];
+  for (const key of candidates) {
+    const value = meta[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }

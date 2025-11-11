@@ -95,19 +95,19 @@
     <main>
       <h1>Kanban Widget</h1>
       <section class="toolbar">
-        <button id="refresh">刷新</button>
-        <button id="addTask" class="secondary">新增任务</button>
+        <button id="refresh">Refresh</button>
+        <button id="addTask" class="secondary">Add Task</button>
         <span id="status"></span>
       </section>
       <section id="board" class="board"></section>
 
       <dialog id="dialog">
         <form method="dialog">
-          <p><label>任务标题 <input id="task-title" required /></label></p>
-          <p><label>所属列 <input id="task-column" required /></label></p>
+          <p><label>Task Title <input id="task-title" required /></label></p>
+          <p><label>Column <input id="task-column" required /></label></p>
           <menu>
-            <button value="cancel" class="secondary">取消</button>
-            <button value="confirm">保存</button>
+            <button value="cancel" class="secondary">Cancel</button>
+            <button value="confirm">Save</button>
           </menu>
         </form>
       </dialog>
@@ -148,7 +148,7 @@
       });
 
       function callTool(tool, args) {
-        statusEl.textContent = `调用 ${tool}…`;
+        statusEl.textContent = `Invoking ${tool}…`;
         window.parent.postMessage({
           type: 'openai.callTool',
           tool,
@@ -181,12 +181,12 @@
               state.meta = result.meta;
             }
           }
-          statusEl.textContent = '已同步';
+          statusEl.textContent = 'Synced';
           render();
         }
 
         if (message.type === 'openai.toolError') {
-          statusEl.textContent = `调用失败：${message.data?.message ?? '未知错误'}`;
+          statusEl.textContent = `Invocation failed: ${message.data?.message ?? 'Unknown error'}`;
         }
       });
 
@@ -195,7 +195,7 @@
         const structured = state.structuredContent;
         const meta = state.meta;
         if (!structured || !structured.columns) {
-          boardEl.innerHTML = '<p>暂无数据。调用工具以加载看板。</p>';
+          boardEl.innerHTML = '<p>No data yet. Run a tool to load the board.</p>';
           return;
         }
 
@@ -211,12 +211,12 @@
             taskEl.className = 'task';
             taskEl.innerHTML = `
               <strong>${escapeHtml(task?.title ?? taskId)}</strong>
-              <small>${escapeHtml(task?.status ?? '未开始')}</small>
+                <small>${escapeHtml(task?.status ?? 'Not started')}</small>
             `;
             const actions = document.createElement('div');
             actions.className = 'toolbar';
             const advance = document.createElement('button');
-            advance.textContent = '推进';
+            advance.textContent = 'Advance';
             advance.className = 'secondary';
             advance.addEventListener('click', () => {
               callTool('advance-task', { taskId });

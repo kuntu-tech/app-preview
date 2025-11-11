@@ -149,12 +149,12 @@ async function createServer() {
           const plan = extractArguments(selectionResponse) ?? {};
           const toolName = typeof plan.toolName === 'string' ? plan.toolName : null;
           if (!toolName) {
-            res.status(422).json({ error: 'OpenAI 未能选择合适的工具' });
+            res.status(422).json({ error: 'OpenAI could not select a suitable tool.' });
             return;
           }
           const selectedTool = findToolByName(normalizedToolsList, toolName);
           if (!selectedTool) {
-            res.status(422).json({ error: `选中的工具 ${toolName} 不存在于列表中` });
+            res.status(422).json({ error: `Selected tool ${toolName} does not exist in the list.` });
             return;
           }
           const args = plan.arguments && typeof plan.arguments === 'object' ? plan.arguments : {};
@@ -181,6 +181,53 @@ async function createServer() {
         console.error('OpenAI argument builder failed:', error);
         const messageText = error instanceof Error ? error.message : String(error);
         res.status(500).json({ error: messageText });
+      }
+    },
+  );
+
+  app.post(
+    '/api/openai/widget-summary',
+    express.json({ limit: '2mb' }),
+    async (req, res) => {
+      if (!openaiClient) {
+        res.status(501).json({ error: 'OpenAI integration not configured on server.' });
+        return;
+      }
+
+      const { structuredContent, meta, toolName, widgetUri, locale, question } = req.body ?? {};
+      if (structuredContent === undefined || structuredContent === null) {
+        res.status(400).json({ error: 'Missing structuredContent payload.' });
+        return;
+      }
+
+      try {
+        const prompt = buildWidgetSummaryPrompt({
+          structuredContent,
+          meta,
+          toolName,
+          widgetUri,
+          locale,
+          question,
+        });
+        const response = await openaiClient.responses.create({
+          model: openaiModel,
+          input: prompt,
+          temperature: 0.2,
+          max_output_tokens: 600,
+        });
+        let summary = extractText(response)?.trim();
+        if (!summary) {
+          res.status(502).json({ error: 'OpenAI did not return a usable summary.' });
+          return;
+        }
+        if (containsNonEnglish(summary)) {
+          summary = await translateToEnglish(summary);
+        }
+        res.json({ summary, usage: response.usage ?? null });
+      } catch (error) {
+        console.error('OpenAI widget summary failed:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(500).json({ error: message });
       }
     },
   );
@@ -296,11 +343,11 @@ function buildPrompt({ tool, message, schema, locale, conversation }) {
       ? tool.description
       : 'No description provided.';
   const systemPrompt =
-    '你是一个严格的 JSON 参数生成器。给定用户指令和工具信息，你只返回符合输入 JSON Schema 的参数对象。禁止返回除 JSON 以外的文本。';
+    'You are a strict JSON parameter generator. Given the user instruction and the tool information, you must return a JSON object that matches the provided schema. Do not return any non-JSON text.';
 
-  const localeText = typeof locale === 'string' && locale.trim() ? locale : 'zh-CN';
+  const localeText = typeof locale === 'string' && locale.trim() ? locale : 'en-US';
 
-  const userPrompt = `工具名称: ${tool.name}\n工具描述: ${toolDescription}\n输入 JSON Schema:\n${schemaText}\n\n上下文对话:\n${contextText || '(无)'}\n\n用户指令 (${localeText}):\n${message}`;
+  const userPrompt = `Tool name: ${tool.name}\nTool description: ${toolDescription}\nInput JSON Schema:\n${schemaText}\n\nConversation context:\n${contextText || '(none)'}\n\nUser instruction (${localeText}):\n${message}`;
 
   return [
     {
@@ -338,19 +385,21 @@ function buildSelectionPrompt({ tools, message, locale, conversation }) {
         .join('\n')
     : '';
 
-  const localeText = typeof locale === 'string' && locale.trim() ? locale : 'zh-CN';
+  const localeText = typeof locale === 'string' && locale.trim() ? locale : 'en-US';
   const toolSummaries = tools
     .map((tool, index) => {
       const schemaSnippet = JSON.stringify(normalizeSchema(tool.inputSchema), null, 2);
-      const description = tool.description ? String(tool.description) : '无描述';
-      return `工具 ${index + 1}:\n名称: ${tool.name}\n标题: ${tool.title ?? '-'}\n描述: ${description}\n输入 Schema:\n${schemaSnippet}`;
+      const description = tool.description ? String(tool.description) : 'No description available.';
+      return `Tool ${index + 1}:\nName: ${tool.name}\nTitle: ${tool.title ?? '-'}\nDescription: ${description}\nInput schema:\n${schemaSnippet}`;
     })
     .join('\n\n');
 
   const systemPrompt =
-    '你是一名工具调度助理。请分析用户请求，从可用工具中选择最合适的一个，并给出调用该工具所需的参数。始终返回 JSON（不包含额外文本）。';
+    'You are a tool-selection assistant. Analyze the user request, choose the most appropriate tool from the list, and provide the JSON arguments that satisfy its schema. Always respond with JSON and no extra text.';
 
-  const userPrompt = `可用工具列表:\n${toolSummaries}\n\n上下文对话:\n${contextText || '(无)'}\n\n用户指令 (${localeText}):\n${message}\n\n请输出 JSON：\n{\n  "toolName": "工具名称（必须来自列表）",\n  "arguments": { ...与输入 Schema 匹配的字段... },\n  "reason": "选择该工具的原因"\n}`;
+  const userPrompt = `Available tools:\n${toolSummaries}\n\nConversation context:\n${
+    contextText || '(none)'
+  }\n\nUser instruction (${localeText}):\n${message}\n\nReturn JSON with the following shape:\n{\n  \"toolName\": \"must match a tool name\",\n  \"arguments\": { ...fields that satisfy the schema... },\n  \"reason\": \"why this tool and argument set were chosen\"\n}`;
 
   return [
     {
@@ -368,6 +417,50 @@ function buildSelectionPrompt({ tools, message, locale, conversation }) {
         {
           type: 'input_text',
           text: userPrompt,
+        },
+      ],
+    },
+  ];
+}
+
+function buildWidgetSummaryPrompt({ structuredContent, meta, toolName, widgetUri, locale, question }) {
+  void locale;
+  const instruction =
+    'Always respond in clear, natural English. Highlight key insights, notable differences, anomalies, and any actionable recommendations. Include concrete numbers or percentages when available.';
+  const questionText = typeof question === 'string' && question.trim().length > 0 ? question.trim() : null;
+  const sourceLabel =
+    [toolName, widgetUri].filter((value) => typeof value === 'string' && value.trim().length > 0)[0] ??
+    'Unnamed dataset';
+  const structuredText = formatJsonForPrompt(structuredContent);
+  const metaText = formatJsonForPrompt(meta ?? {});
+  const taskDescription = [
+    questionText ? `User question: ${questionText}` : null,
+    `Data source: ${sourceLabel}`,
+    'Structured data (JSON):',
+    structuredText,
+    'Additional metadata (JSON):',
+    metaText,
+    'Task: Provide 2-4 English sentences that summarize the dataset, call out major findings, comparisons, or trends, and finish with a concise takeaway or recommendation.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return [
+    {
+      role: 'system',
+      content: [
+        {
+          type: 'input_text',
+          text: `You are an analytical assistant that explains tool outputs in plain English.\n${instruction}`,
+        },
+      ],
+    },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'input_text',
+          text: taskDescription,
         },
       ],
     },
@@ -418,6 +511,31 @@ function extractArguments(response) {
   return {};
 }
 
+function extractText(response) {
+  if (!response) return '';
+  if (Array.isArray(response.output_text)) {
+    for (const item of response.output_text) {
+      if (typeof item === 'string' && item.trim().length > 0) {
+        return item;
+      }
+    }
+  }
+  const output = Array.isArray(response.output) ? response.output : [];
+  for (const step of output) {
+    const contents = Array.isArray(step?.content) ? step.content : [];
+    for (const item of contents) {
+      if (!item) continue;
+      if (item.type === 'output_text' && typeof item.text === 'string' && item.text.trim().length > 0) {
+        return item.text;
+      }
+      if (item.type === 'text' && typeof item.text === 'string' && item.text.trim().length > 0) {
+        return item.text;
+      }
+    }
+  }
+  return '';
+}
+
 function cloneDeep(value) {
   if (typeof structuredClone === 'function') {
     return structuredClone(value);
@@ -461,4 +579,63 @@ function findToolByName(tools, name) {
   const normalized = String(name ?? '').trim();
   if (!normalized) return null;
   return tools.find((tool) => typeof tool.name === 'string' && tool.name.trim() === normalized) ?? null;
+}
+
+function formatJsonForPrompt(value, maxLength = 6000) {
+  if (value === undefined || value === null) {
+    return '(empty)';
+  }
+  try {
+    const json = JSON.stringify(value, null, 2);
+    if (json.length <= maxLength) {
+      return json;
+    }
+    const truncated = json.slice(0, maxLength);
+    return `${truncated}\n... (truncated ${json.length - maxLength} characters)`;
+  } catch {
+    return '(serialization failed)';
+  }
+}
+
+function containsNonEnglish(text) {
+  if (typeof text !== 'string') return false;
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+}
+
+async function translateToEnglish(text) {
+  if (!openaiClient || typeof text !== 'string' || !text.trim()) {
+    return text;
+  }
+  try {
+    const translation = await openaiClient.responses.create({
+      model: openaiModel,
+      input: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'input_text',
+              text: 'You translate any input into fluent English. Respond with English sentences only.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: text,
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+      max_output_tokens: 200,
+    });
+    const translated = extractText(translation)?.trim();
+    return translated || text;
+  } catch (error) {
+    console.warn('Translation to English failed, returning original summary.', error);
+    return text;
+  }
 }

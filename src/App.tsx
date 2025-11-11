@@ -511,7 +511,7 @@ export default function App({ appVersion }: AppProps) {
                 spellCheck={false}
               />
               <button type="submit" className="ghost" disabled={!canApplyServerUrl}>
-                连接
+                Connect
               </button>
             </div>
           </label>
@@ -657,9 +657,11 @@ export default function App({ appVersion }: AppProps) {
             <p className={`helper-text helper-text--${toolsStatus.status}`}>
               {toolsStatus.status === 'loading' && `Loading tools from ${toolsStatus.endpoint}...`}
               {toolsStatus.status === 'success' &&
-                `${toolsStatus.message ?? 'Loading successful'}（${new Date(toolsStatus.timestamp ?? Date.now()).toLocaleTimeString()}）`}
+                `${toolsStatus.message ?? 'Loading successful'} (${new Date(
+                  toolsStatus.timestamp ?? Date.now(),
+                ).toLocaleTimeString()})`}
               {toolsStatus.status === 'error' &&
-                `Loading failed: ${toolsStatus.message ?? 'Unknown error'}（${toolsStatus.endpoint}）`}
+                `Loading failed: ${toolsStatus.message ?? 'Unknown error'} (${toolsStatus.endpoint})`}
             </p>
           )}
           <div className="tool-list" role="list">
@@ -691,7 +693,7 @@ export default function App({ appVersion }: AppProps) {
         </div>
         {activeTool && (
           <div className="sidebar__section">
-            <h2>输入 Schema</h2>
+            <h2>Input Schema</h2>
             <details className="schema-viewer" open>
               <summary>JSON Schema Details</summary>
               <pre>{JSON.stringify(activeTool.inputSchema ?? {}, null, 2)}</pre>

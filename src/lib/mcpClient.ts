@@ -19,6 +19,18 @@ export interface WidgetResource {
   baseUrl?: string;
 }
 
+export class WidgetResourceError extends Error {
+  public readonly code: string;
+  public readonly originalError?: unknown;
+
+  constructor(message: string, code: string, originalError?: unknown) {
+    super(message);
+    this.name = 'WidgetResourceError';
+    this.code = code;
+    this.originalError = originalError;
+  }
+}
+
 const DEFAULT_HEADERS = {
   'Content-Type': 'application/json',
   Accept: 'application/json, text/event-stream',
@@ -92,15 +104,16 @@ export class MCPClient {
     }
 
     if (widgetUri.startsWith('ui://')) {
-      const normalized = widgetUri
-        .replace(/^ui:\/\//, '')
-        .replace(/^widget\//, '')
-        .replace(/\.html?$/, (ext) => ext.toLowerCase());
-      const path = `${this.widgetBasePath.replace(/\/$/, '')}/${normalized}`;
-      return { type: 'src', value: path };
+      throw new WidgetResourceError(
+        `Widget ${widgetUri} is unavailable from the MCP server.`,
+        'widget_resource_unavailable',
+      );
     }
 
-    throw new Error(`Unable to resolve widget URI: ${widgetUri}`);
+    throw new WidgetResourceError(
+      `Unable to resolve widget URI: ${widgetUri}`,
+      'widget_resource_unavailable',
+    );
   }
 
   private async jsonRpcRequest<TResult = unknown, TParams = unknown>(

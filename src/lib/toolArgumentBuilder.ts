@@ -49,7 +49,7 @@ export class ToolArgumentBuilder {
     const payload = (await response.json()) as BuildArgumentsResponse;
     const toolName = typeof payload?.toolName === 'string' ? payload.toolName : request.tool?.name;
     if (!toolName) {
-      throw new Error('OpenAI 未能选择可用的工具');
+      throw new Error('OpenAI could not select an available tool.');
     }
     return {
       toolName,
