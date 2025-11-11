@@ -1,6 +1,7 @@
 import { FormEvent, SVGProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MCPClient } from './lib/mcpClient';
 import { ToolArgumentBuilder } from './lib/toolArgumentBuilder';
+import { buildToolGuidance } from './lib/toolGuidance';
 import type {
   MCPToolCallResult,
   MCPToolContentChunk,
@@ -388,6 +389,16 @@ export default function App({ appVersion }: AppProps) {
     try {
       const result = await client.callTool(toolName, args);
       appendAssistantMessage(toolName, result);
+      const guidance = buildToolGuidance(targetTool, args);
+      if (guidance) {
+        appendMessage({
+          id: createId('guidance'),
+          role: 'system',
+          tone: 'info',
+          text: guidance,
+          createdAt: Date.now(),
+        });
+      }
       setCallError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
