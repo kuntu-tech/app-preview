@@ -41,14 +41,15 @@ export function buildToolGuidance(
     return null;
   }
 
-  const intro = 'Nice! Want an even clearer answer?';
+  const intro = selectIntro(prioritized, providedArgs);
   const suggestions = prioritized
     .slice(0, 2)
     .map((hint) => formatHint(hint, providedArgs));
   if (suggestions.length === 0) {
     return null;
   }
-  return `${intro} ${suggestions.join(' ')}`;
+  const suggestionText = suggestions.join(' ');
+  return intro ? `${intro} ${suggestionText}` : suggestionText;
 }
 
 function sanitizeSchema(schema: unknown): JSONSchemaLike | null {
@@ -217,4 +218,30 @@ function makeConversational(detail: string, friendlyName: string): string {
 
 function toFriendlyName(value: string): string {
   return value.replace(/[_-]+/g, ' ').trim();
+}
+
+const INTRO_VARIANTS = [
+  'Sounds promising—let’s make the response even sharper.',
+  'Great start! We can elevate the answer by adding a bit more detail.',
+  'Nice momentum here. A touch more context will really help.',
+  'Love where this is going. Let’s tighten things up just a little.',
+  'Almost there—just a couple of details will make it shine.',
+];
+
+function selectIntro(
+  hints: ExtractedHint[],
+  providedArgs: Record<string, unknown> | undefined,
+): string {
+  if (!INTRO_VARIANTS.length) {
+    return '';
+  }
+  const seedSource = JSON.stringify({
+    hints: hints.map((item) => item.name),
+    provided: providedArgs ?? null,
+  });
+  let hash = 0;
+  for (let index = 0; index < seedSource.length; index += 1) {
+    hash = (hash * 31 + seedSource.charCodeAt(index)) >>> 0;
+  }
+  return INTRO_VARIANTS[hash % INTRO_VARIANTS.length];
 }
