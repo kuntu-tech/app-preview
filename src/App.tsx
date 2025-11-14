@@ -549,7 +549,7 @@ export default function App({ appVersion }: AppProps) {
             value={messageDraft}
             onChange={(event) => setMessageDraft(event.target.value)}
             onKeyDown={handleComposerKeyDown}
-            placeholder="Ask Anything"
+            placeholder="Ask Anything about your chatapp"
             rows={3}
             aria-label="Chat input"
           />
