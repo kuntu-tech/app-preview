@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production node server/index.mjs"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "http-proxy-middleware": "^3.0.1",
     "openai": "^4.58.0",

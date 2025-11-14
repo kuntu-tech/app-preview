@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer as createViteServer } from 'vite';
@@ -22,6 +23,10 @@ const openaiClient =
       })
     : null;
 const openaiModel = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini';
+const openaiApiMode = String(process.env.OPENAI_API_MODE ?? 'auto').toLowerCase();
+const useChatCompletions =
+  openaiApiMode === 'chat-completions' ||
+  (openaiApiMode === 'auto' && shouldForceChatCompletions(process.env.OPENAI_BASE_URL));
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -134,16 +139,15 @@ async function createServer() {
 
       try {
         if (useAutomaticSelection) {
-          const selectionResponse = await openaiClient.responses.create({
-            model: openaiModel,
-            input: buildSelectionPrompt({
+          const selectionResponse = await createModelResponse({
+            messages: buildSelectionPrompt({
               tools: normalizedToolsList,
               message,
               locale,
               conversation,
             }),
             temperature: 0.1,
-            max_output_tokens: 800,
+            maxTokens: 800,
           });
 
           const plan = extractArguments(selectionResponse) ?? {};
@@ -168,11 +172,10 @@ async function createServer() {
         }
 
         const schema = normalizeSchema(normalizedTool.inputSchema);
-        const response = await openaiClient.responses.create({
-          model: openaiModel,
-          input: buildPrompt({ tool: normalizedTool, message, schema, locale, conversation }),
+        const response = await createModelResponse({
+          messages: buildPrompt({ tool: normalizedTool, message, schema, locale, conversation }),
           temperature: 0,
-          max_output_tokens: 400,
+          maxTokens: 400,
         });
 
         const args = extractArguments(response) ?? {};
@@ -209,11 +212,10 @@ async function createServer() {
           locale,
           question,
         });
-        const response = await openaiClient.responses.create({
-          model: openaiModel,
-          input: prompt,
+        const response = await createModelResponse({
+          messages: prompt,
           temperature: 0.2,
-          max_output_tokens: 600,
+          maxTokens: 600,
         });
         let summary = extractText(response)?.trim();
         if (!summary) {
@@ -294,6 +296,51 @@ process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
 });
 
+async function createModelResponse({ messages, temperature, maxTokens }) {
+  if (!openaiClient) {
+    throw new Error('OpenAI client is not configured.');
+  }
+  const normalizedMessages = normalizeMessages(messages);
+  if (useChatCompletions) {
+    return openaiClient.chat.completions.create({
+      model: openaiModel,
+      messages: normalizedMessages,
+      temperature,
+      max_tokens: maxTokens,
+    });
+  }
+  return openaiClient.responses.create({
+    model: openaiModel,
+    input: convertMessagesToResponseInput(normalizedMessages),
+    temperature,
+    max_output_tokens: maxTokens,
+  });
+}
+
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+  return messages.map((message) => {
+    const role = typeof message?.role === 'string' ? message.role : 'user';
+    const content =
+      typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? '');
+    return { role, content };
+  });
+}
+
+function convertMessagesToResponseInput(messages) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: [
+      {
+        type: 'input_text',
+        text: message.content,
+      },
+    ],
+  }));
+}
+
 async function readRequestBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -352,21 +399,11 @@ function buildPrompt({ tool, message, schema, locale, conversation }) {
   return [
     {
       role: 'system',
-      content: [
-        {
-          type: 'input_text',
-          text: systemPrompt,
-        },
-      ],
+      content: systemPrompt,
     },
     {
       role: 'user',
-      content: [
-        {
-          type: 'input_text',
-          text: userPrompt,
-        },
-      ],
+      content: userPrompt,
     },
   ];
 }
@@ -404,21 +441,11 @@ function buildSelectionPrompt({ tools, message, locale, conversation }) {
   return [
     {
       role: 'system',
-      content: [
-        {
-          type: 'input_text',
-          text: systemPrompt,
-        },
-      ],
+      content: systemPrompt,
     },
     {
       role: 'user',
-      content: [
-        {
-          type: 'input_text',
-          text: userPrompt,
-        },
-      ],
+      content: userPrompt,
     },
   ];
 }
@@ -448,21 +475,11 @@ function buildWidgetSummaryPrompt({ structuredContent, meta, toolName, widgetUri
   return [
     {
       role: 'system',
-      content: [
-        {
-          type: 'input_text',
-          text: `You are an analytical assistant that explains tool outputs in plain English.\n${instruction}`,
-        },
-      ],
+      content: `You are an analytical assistant that explains tool outputs in plain English.\n${instruction}`,
     },
     {
       role: 'user',
-      content: [
-        {
-          type: 'input_text',
-          text: taskDescription,
-        },
-      ],
+      content: taskDescription,
     },
   ];
 }
@@ -480,14 +497,18 @@ function normalizeSchema(schemaCandidate) {
 
 function extractArguments(response) {
   if (!response) return {};
-  if (Array.isArray(response.output_text)) {
+  const parsedFromText = tryParseJson(extractText(response));
+  if (parsedFromText) {
+    return parsedFromText;
+  }
+  if (Array.isArray(response?.output_text)) {
     for (const item of response.output_text) {
       if (typeof item !== 'string') continue;
       const parsed = tryParseJson(item);
       if (parsed) return parsed;
     }
   }
-  const output = Array.isArray(response.output) ? response.output : [];
+  const output = Array.isArray(response?.output) ? response.output : [];
   for (const step of output) {
     const contents = Array.isArray(step?.content) ? step.content : [];
     for (const item of contents) {
@@ -513,6 +534,9 @@ function extractArguments(response) {
 
 function extractText(response) {
   if (!response) return '';
+  if (isChatCompletionResponse(response)) {
+    return extractChatCompletionText(response);
+  }
   if (Array.isArray(response.output_text)) {
     for (const item of response.output_text) {
       if (typeof item === 'string' && item.trim().length > 0) {
@@ -607,30 +631,19 @@ async function translateToEnglish(text) {
     return text;
   }
   try {
-    const translation = await openaiClient.responses.create({
-      model: openaiModel,
-      input: [
+    const translation = await createModelResponse({
+      messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'input_text',
-              text: 'You translate any input into fluent English. Respond with English sentences only.',
-            },
-          ],
+          content: 'You translate any input into fluent English. Respond with English sentences only.',
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: text,
-            },
-          ],
+          content: text,
         },
       ],
       temperature: 0,
-      max_output_tokens: 200,
+      maxTokens: 200,
     });
     const translated = extractText(translation)?.trim();
     return translated || text;
@@ -638,4 +651,43 @@ async function translateToEnglish(text) {
     console.warn('Translation to English failed, returning original summary.', error);
     return text;
   }
+}
+
+function shouldForceChatCompletions(baseUrl) {
+  if (typeof baseUrl !== 'string') {
+    return false;
+  }
+  return /dashscope|compatible-mode/i.test(baseUrl);
+}
+
+function isChatCompletionResponse(payload) {
+  return Boolean(payload && typeof payload === 'object' && Array.isArray(payload.choices));
+}
+
+function extractChatCompletionText(response) {
+  if (!isChatCompletionResponse(response)) {
+    return '';
+  }
+  for (const choice of response.choices) {
+    const message = choice?.message;
+    if (!message) continue;
+    const content = message.content;
+    if (typeof content === 'string' && content.trim()) {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      const textParts = content
+        .map((part) => {
+          if (!part) return '';
+          if (typeof part === 'string') return part;
+          if (typeof part?.text === 'string') return part.text;
+          return '';
+        })
+        .filter((value) => typeof value === 'string' && value.trim().length > 0);
+      if (textParts.length > 0) {
+        return textParts.join('\n');
+      }
+    }
+  }
+  return '';
 }
