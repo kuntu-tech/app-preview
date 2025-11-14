@@ -252,18 +252,19 @@ export default function App({ appVersion }: AppProps) {
     return () => window.removeEventListener('message', handleExternalMessage);
   }, [embedMode, applyIncomingDraft]);
 
-  const callSelectedTool = useCallback(async () => {
+  const callSelectedTool = useCallback(async (messageOverride?: string) => {
     if (argumentMode === 'auto' && tools.length === 0) {
       throw new Error('No tools available, please check the MCP Server');
     }
 
-    const trimmedMessage = messageDraft.trim();
+    const messageToUse = messageOverride ?? messageDraft;
+    const trimmedMessage = messageToUse.trim();
 
     if (trimmedMessage.length > 0) {
       appendMessage({
         id: createId('user'),
         role: 'user',
-        text: messageDraft,
+        text: messageToUse,
         createdAt: Date.now(),
       });
     }
@@ -274,7 +275,7 @@ export default function App({ appVersion }: AppProps) {
           {
             id: 'pending-user',
             role: 'user',
-            text: messageDraft,
+            text: messageToUse,
             createdAt: Date.now(),
           },
         ]
@@ -418,18 +419,23 @@ export default function App({ appVersion }: AppProps) {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (isCalling) return;
+      const messageToSend = messageDraft.trim();
+      if (messageToSend.length === 0) return;
+      
+      // 立即清空输入框
+      setMessageDraft('');
+      
       try {
         setIsCalling(true);
         setCallError(null);
-        await callSelectedTool();
+        await callSelectedTool(messageToSend);
       } catch (error) {
         console.warn('Tool call failed', error);
       } finally {
         setIsCalling(false);
-        setMessageDraft('');
       }
     },
-    [argumentMode, callSelectedTool, isCalling],
+    [argumentMode, callSelectedTool, isCalling, messageDraft],
   );
 
   const handleWidgetToolInvocation = useCallback(

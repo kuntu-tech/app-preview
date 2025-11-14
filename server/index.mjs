@@ -343,11 +343,11 @@ function buildPrompt({ tool, message, schema, locale, conversation }) {
       ? tool.description
       : 'No description provided.';
   const systemPrompt =
-    'You are a strict JSON parameter generator. Given the user instruction and the tool information, you must return a JSON object that matches the provided schema. Do not return any non-JSON text.';
+    'You are a strict JSON parameter generator. Given the user instruction and the tool information, you must return a JSON object that matches the provided schema. Do not return any non-JSON text.\n\nIMPORTANT RULE: Unless the user explicitly specifies query/search/filter parameters (such as search keywords, filter conditions, query terms, etc.), ONLY include pagination parameters (page, limit, pageSize, offset, skip, cursor, etc.) in the output. Do not infer or guess query parameters that are not explicitly mentioned by the user.';
 
   const localeText = typeof locale === 'string' && locale.trim() ? locale : 'en-US';
 
-  const userPrompt = `Tool name: ${tool.name}\nTool description: ${toolDescription}\nInput JSON Schema:\n${schemaText}\n\nConversation context:\n${contextText || '(none)'}\n\nUser instruction (${localeText}):\n${message}`;
+  const userPrompt = `Tool name: ${tool.name}\nTool description: ${toolDescription}\nInput JSON Schema:\n${schemaText}\n\nConversation context:\n${contextText || '(none)'}\n\nUser instruction (${localeText}):\n${message}\n\nRemember: Only include query/search/filter parameters if the user explicitly mentions them. Otherwise, only use pagination parameters.`;
 
   return [
     {
@@ -395,11 +395,11 @@ function buildSelectionPrompt({ tools, message, locale, conversation }) {
     .join('\n\n');
 
   const systemPrompt =
-    'You are a tool-selection assistant. Analyze the user request, choose the most appropriate tool from the list, and provide the JSON arguments that satisfy its schema. Always respond with JSON and no extra text.';
+    'You are a tool-selection assistant. Analyze the user request, choose the most appropriate tool from the list, and provide the JSON arguments that satisfy its schema. Always respond with JSON and no extra text.\n\nIMPORTANT RULE: Unless the user explicitly specifies query/search/filter parameters (such as search keywords, filter conditions, query terms, etc.), ONLY include pagination parameters (page, limit, pageSize, offset, skip, cursor, etc.) in the arguments. Do not infer or guess query parameters that are not explicitly mentioned by the user.';
 
   const userPrompt = `Available tools:\n${toolSummaries}\n\nConversation context:\n${
     contextText || '(none)'
-  }\n\nUser instruction (${localeText}):\n${message}\n\nReturn JSON with the following shape:\n{\n  \"toolName\": \"must match a tool name\",\n  \"arguments\": { ...fields that satisfy the schema... },\n  \"reason\": \"why this tool and argument set were chosen\"\n}`;
+  }\n\nUser instruction (${localeText}):\n${message}\n\nReturn JSON with the following shape:\n{\n  \"toolName\": \"must match a tool name\",\n  \"arguments\": { ...fields that satisfy the schema... },\n  \"reason\": \"why this tool and argument set were chosen\"\n}\n\nRemember: Only include query/search/filter parameters if the user explicitly mentions them. Otherwise, only use pagination parameters.`;
 
   return [
     {
