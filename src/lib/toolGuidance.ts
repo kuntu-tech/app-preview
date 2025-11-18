@@ -152,14 +152,15 @@ function compareHints(a: ExtractedHint, b: ExtractedHint): number {
 }
 
 function formatHint(hint: ExtractedHint, providedArgs: Record<string, unknown> | undefined): string {
-  const friendlyName = toFriendlyName(hint.name);
-  const alreadyProvided = Boolean(providedArgs && hint.name in providedArgs);
-  const leadIn = hint.required && !alreadyProvided ? 'Be sure to tell me about' : alreadyProvided ? 'If you want, you can add more about' : 'You can also mention';
-  const detail = hint.description || defaultDescription(hint.name);
-  const conversationalDetail = makeConversational(detail, friendlyName);
-  return conversationalDetail
-    ? `${leadIn} ${friendlyName} so I can ${conversationalDetail}.`
-    : `${leadIn} ${friendlyName}.`;
+  return "";
+  // const friendlyName = toFriendlyName(hint.name);
+  // const alreadyProvided = Boolean(providedArgs && hint.name in providedArgs);
+  // const leadIn = hint.required && !alreadyProvided ? 'Be sure to tell me about' : alreadyProvided ? 'If you want, you can add more about' : 'You can also mention';
+  // const detail = hint.description || defaultDescription(hint.name);
+  // const conversationalDetail = makeConversational(detail, friendlyName);
+  // return conversationalDetail
+  //   ? `${leadIn} ${friendlyName} so I can ${conversationalDetail}.`
+  //   : `${leadIn} ${friendlyName}.`;
 }
 
 function defaultDescription(fieldName: string): string {
@@ -220,12 +221,12 @@ function toFriendlyName(value: string): string {
   return value.replace(/[_-]+/g, ' ').trim();
 }
 
-const INTRO_VARIANTS = [
-  'Sounds promising—let’s make the response even sharper.',
-  'Great start! We can elevate the answer by adding a bit more detail.',
-  'Nice momentum here. A touch more context will really help.',
-  'Love where this is going. Let’s tighten things up just a little.',
-  'Almost there—just a couple of details will make it shine.',
+const INTRO_VARIANTS: string[] = [
+  // 'Sounds promising—let’s make the response even sharper.',
+  // 'Great start! We can elevate the answer by adding a bit more detail.',
+  // 'Nice momentum here. A touch more context will really help.',
+  // 'Love where this is going. Let’s tighten things up just a little.',
+  // 'Almost there—just a couple of details will make it shine.',
 ];
 
 function selectIntro(

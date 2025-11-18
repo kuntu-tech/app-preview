@@ -1,4 +1,5 @@
 import { FormEvent, KeyboardEvent, SVGProps, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { MCPClient } from './lib/mcpClient';
 import { ToolArgumentBuilder } from './lib/toolArgumentBuilder';
 import { buildToolGuidance } from './lib/toolGuidance';
@@ -755,6 +756,52 @@ function ChatBubble({
   const hasStructuredContent = message.structuredContent !== undefined && message.structuredContent !== null;
   const hasMeta = message.meta !== undefined && message.meta !== null;
 
+  // 预处理文本，改善 Markdown 格式
+  const preprocessMarkdown = (text: string): string => {
+    if (!text) return text;
+    
+    // 第一步：将行内的列表项分离出来
+    // 匹配模式：非换行符 + 空格 + "- " + 大写字母或引号开头的文本
+    let processed = text
+      // 处理 " - " 格式，如果后面跟着大写字母或引号，说明是列表项
+      .replace(/([^\n])\s+-\s+([A-Z"])/g, '$1\n- $2')
+      // 处理行内其他可能的 "- " 格式
+      .replace(/([^\n])- /g, '$1\n- ')
+      // 确保列表项前后都有空行（段落和列表之间）
+      .replace(/([^\n])\n- /g, '$1\n\n- ')
+      // 列表项结束后如果有非列表内容，添加空行
+      .replace(/- ([^\n]+)\n([^\n-])/g, '- $1\n\n$2')
+      // 清理多余的连续换行（最多保留两个）
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    
+    // 第二步：处理分类标题（首字母大写，不包含引号）
+    const lines = processed.split('\n');
+    const result: string[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const nextLine = lines[i + 1];
+      const trimmedLine = line.trim();
+      
+      // 检测分类标题：以 "- " 开头，首字母大写，不包含引号，且下一行也是列表项
+      if (
+        trimmedLine.match(/^-\s+[A-Z][^"]+$/) && 
+        nextLine && 
+        nextLine.trim().match(/^-\s+/)
+      ) {
+        // 提取标题文本（去掉 "- " 前缀）
+        const title = trimmedLine.replace(/^-\s+/, '').trim();
+        // 转换为粗体格式
+        result.push(`- **${title}**`);
+      } else {
+        result.push(line);
+      }
+    }
+    
+    return result.join('\n');
+  };
+
   return (
     <div className="chat-bubble chat-bubble--assistant">
       {message.toolName && (
@@ -765,9 +812,15 @@ function ChatBubble({
       <div className="chat-bubble__body">
         {textChunks.length > 0 && (
           <div className="chat-bubble__text">
-            {textChunks.map((chunk, index) => (
-              <p key={index}>{chunk.text}</p>
-            ))}
+            {textChunks.map((chunk, index) => {
+              const text = typeof chunk.text === 'string' ? chunk.text : '';
+              const processedText = preprocessMarkdown(text);
+              return (
+                <div key={index} className="markdown-content">
+                  <ReactMarkdown>{processedText}</ReactMarkdown>
+                </div>
+              );
+            })}
           </div>
         )}
         {message.widgetUri && (
