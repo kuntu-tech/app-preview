@@ -82,6 +82,8 @@ async function createServer() {
         method,
         headers: forwardHeaders,
         redirect: 'manual',
+        // 设置超时时间（30秒）
+        signal: AbortSignal.timeout(600000),
         ...(requestBody !== undefined ? { body: requestBody } : {}),
       };
       const fetchResponse = await fetch(targetUrl, fetchInit);
@@ -101,8 +103,38 @@ async function createServer() {
 
       res.end();
     } catch (error) {
-      console.error('Proxy request failed:', error);
-      res.status(502).json({ error: 'Proxy request failed.' });
+      // 判断错误类型，只对真正的错误进行详细日志输出
+      const isNetworkError = 
+        error?.code === 'UND_ERR_SOCKET' ||
+        error?.cause?.code === 'UND_ERR_SOCKET' ||
+        error?.name === 'AbortError' ||
+        error?.message?.includes('fetch failed') ||
+        error?.message?.includes('ECONNREFUSED') ||
+        error?.message?.includes('ENOTFOUND') ||
+        error?.message?.includes('timeout');
+      
+      const isTimeout = error?.name === 'AbortError' || error?.message?.includes('timeout');
+      
+      // 网络错误可能是暂时的，只在开发环境输出详细信息
+      if (isNetworkError && process.env.NODE_ENV === 'development') {
+        const errorMsg = isTimeout 
+          ? 'Request timeout'
+          : error?.message || error?.cause?.message || 'Connection closed';
+        console.warn(`Proxy request to ${targetUrl.hostname} failed (network error):`, errorMsg);
+      } else if (!isNetworkError) {
+        // 非网络错误（如解析错误等）才输出完整堆栈
+        console.error('Proxy request failed:', error);
+      }
+      
+      // 返回友好的错误信息
+      let errorMessage = 'Proxy request failed.';
+      if (isTimeout) {
+        errorMessage = 'Request timeout. The target server did not respond in time.';
+      } else if (isNetworkError) {
+        errorMessage = 'Unable to connect to the target server. Please check if the server is running and accessible.';
+      }
+      
+      res.status(502).json({ error: errorMessage });
     }
   });
 
